@@ -4,6 +4,7 @@ import * as d3 from 'd3';
 import { sankey, sankeyLinkHorizontal, sankeyCenter } from 'd3-sankey';
 import { SankeyData, SankeyNode, SankeyLink } from '../types';
 import { ArrowDownTrayIcon } from '@heroicons/react/24/outline';
+import { formatJapaneseCurrency } from '../App';
 
 interface Props {
   data: SankeyData;
@@ -18,7 +19,6 @@ const SankeyChart: React.FC<Props> = ({ data, city, width = 800, height = 700 })
   useEffect(() => {
     if (!svgRef.current || !data.nodes.length) return;
 
-    // --- Pre-processing to prevent Circular Link error ---
     const nodesMap = new Map();
     data.nodes.forEach(node => nodesMap.set(node.id, []));
     
@@ -53,8 +53,6 @@ const SankeyChart: React.FC<Props> = ({ data, city, width = 800, height = 700 })
 
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove();
-
-    // Set XML namespace for the SVG to ensure it works when downloaded
     svg.attr('xmlns', 'http://www.w3.org/2000/svg');
 
     const margin = { top: 20, right: 180, bottom: 20, left: 20 };
@@ -79,7 +77,6 @@ const SankeyChart: React.FC<Props> = ({ data, city, width = 800, height = 700 })
 
       const color = d3.scaleOrdinal(d3.schemeTableau10);
 
-      // Links
       const link = g.append('g')
         .attr('fill', 'none')
         .attr('stroke-opacity', 0.4)
@@ -93,9 +90,8 @@ const SankeyChart: React.FC<Props> = ({ data, city, width = 800, height = 700 })
         .attr('stroke', (d: any) => color(d.source.id))
         .attr('stroke-width', (d: any) => Math.max(1, d.width))
         .append('title')
-        .text((d: any) => `${d.source.name} → ${d.target.name}\n${d.value.toLocaleString()} 千円`);
+        .text((d: any) => `${d.source.name} → ${d.target.name}\n${formatJapaneseCurrency(d.value)}`);
 
-      // Nodes
       const node = g.append('g')
         .selectAll('g')
         .data(nodes)
@@ -110,9 +106,8 @@ const SankeyChart: React.FC<Props> = ({ data, city, width = 800, height = 700 })
         .attr('stroke', '#fff')
         .attr('stroke-width', 1)
         .append('title')
-        .text((d: any) => `${d.name}\n合計: ${d.value.toLocaleString()} 千円`);
+        .text((d: any) => `${d.name}\n合計: ${formatJapaneseCurrency(d.value)}`);
 
-      // Labels
       node.append('text')
         .attr('x', (d: any) => d.x0 < innerWidth / 2 ? d.x1 + 8 : d.x0 - 8)
         .attr('y', (d: any) => (d.y1 + d.y0) / 2)
@@ -126,27 +121,17 @@ const SankeyChart: React.FC<Props> = ({ data, city, width = 800, height = 700 })
         .attr('font-weight', 'normal')
         .attr('x', (d: any) => d.x0 < innerWidth / 2 ? d.x1 + 8 : d.x0 - 8)
         .attr('dy', '1.2em')
-        .text((d: any) => `${d.value.toLocaleString()}`);
+        .text((d: any) => formatJapaneseCurrency(d.value));
         
     } catch (err) {
       console.error("Sankey layout failed:", err);
-      g.append('text')
-        .attr('x', innerWidth / 2)
-        .attr('y', innerHeight / 2)
-        .attr('text-anchor', 'middle')
-        .attr('style', 'fill: #ef4444; font-weight: bold;')
-        .text('データの構造に問題があり、図を表示できませんでした。');
     }
 
   }, [data, width, height]);
 
   const handleDownload = () => {
     if (!svgRef.current) return;
-    
-    // Create a clone to avoid modifying the displayed one
     const svgClone = svgRef.current.cloneNode(true) as SVGSVGElement;
-    
-    // Add a background rect for visibility in some viewers
     const background = document.createElementNS("http://www.w3.org/2000/svg", "rect");
     background.setAttribute("width", width.toString());
     background.setAttribute("height", height.toString());
@@ -172,10 +157,9 @@ const SankeyChart: React.FC<Props> = ({ data, city, width = 800, height = 700 })
         <button
           onClick={handleDownload}
           className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-bold hover:bg-slate-800 shadow-lg transition-transform hover:scale-105 active:scale-95"
-          title="SVG形式でダウンロード"
         >
           <ArrowDownTrayIcon className="w-4 h-4" />
-          <span>図を保存 (SVG)</span>
+          <span>保存 (SVG)</span>
         </button>
       </div>
       <div className="overflow-x-auto no-scrollbar">

@@ -1,8 +1,9 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { fetchCityBudget } from './services/geminiService';
 import { BudgetResponse, City } from './types';
 import SankeyChart from './components/SankeyChart';
+import BudgetComparisonChart from './components/BudgetComparisonChart';
 import { 
   ChartBarIcon, 
   ArrowPathIcon, 
@@ -12,15 +13,26 @@ import {
   DocumentTextIcon,
   BuildingOffice2Icon,
   ExclamationTriangleIcon,
-  ClockIcon
+  ClockIcon,
+  BanknotesIcon,
+  PresentationChartBarIcon,
+  ArrowsRightLeftIcon
 } from '@heroicons/react/24/outline';
 
 const CACHE_KEY = 'tokyo_23_budget_cache_v2';
 
+// Utility to format "Thousand Yen" to natural Japanese units
+export const formatJapaneseCurrency = (kYen: number) => {
+  if (kYen >= 100000) {
+    return `${(kYen / 100000).toFixed(2)} 億円`;
+  }
+  return `${(kYen / 10).toLocaleString()} 万円`;
+};
+
 const App: React.FC = () => {
   const [selectedCity, setSelectedCity] = useState<City>('世田谷区');
+  const [viewMode, setViewMode] = useState<'flow' | 'compare'>('flow');
   const [cache, setCache] = useState<Partial<Record<City, BudgetResponse & { timestamp: number }>>>(() => {
-    // Initialize from localStorage
     try {
       const saved = localStorage.getItem(CACHE_KEY);
       return saved ? JSON.parse(saved) : {};
@@ -33,13 +45,18 @@ const App: React.FC = () => {
 
   const budgetInfo = cache[selectedCity] || null;
 
-  // Persist cache to localStorage whenever it changes
+  const totalBudget = useMemo(() => {
+    if (!budgetInfo?.data.links) return 0;
+    return budgetInfo.data.links
+      .filter(link => link.source.startsWith('rev_'))
+      .reduce((sum, link) => sum + link.value, 0);
+  }, [budgetInfo]);
+
   useEffect(() => {
     localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
   }, [cache]);
 
   const loadData = useCallback(async (city: City, force: boolean = false) => {
-    // If not forcing and data exists in cache, do nothing
     if (!force && cache[city]) {
       setError(null);
       return;
@@ -74,6 +91,7 @@ const App: React.FC = () => {
   const handleCityChange = (city: City) => {
     if (city !== selectedCity) {
       setSelectedCity(city);
+      if (viewMode === 'compare') setViewMode('flow');
     }
   };
 
@@ -91,7 +109,7 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-slate-50 pb-16">
       <header className="bg-slate-900 text-white shadow-xl sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 sm:py-6">
-          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <div className="p-2 bg-slate-800 rounded-lg">
                 <MapIcon className="w-8 h-8 text-emerald-400" />
@@ -104,52 +122,79 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex flex-wrap bg-slate-800 p-1 rounded-xl border border-slate-700 shadow-inner max-w-full overflow-x-auto no-scrollbar scroll-smooth">
-                {cities.map((city) => (
-                  <button
-                    key={city}
-                    disabled={loading}
-                    onClick={() => handleCityChange(city)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
-                      selectedCity === city 
-                        ? 'bg-emerald-600 text-white shadow-md' 
-                        : 'text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30'
-                    }`}
-                  >
-                    {city}
-                  </button>
-                ))}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+              <div className="flex bg-slate-800 p-1 rounded-xl border border-slate-700">
+                <button
+                  onClick={() => setViewMode('flow')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                    viewMode === 'flow' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <ArrowsRightLeftIcon className="w-4 h-4" />
+                  予算フロー
+                </button>
+                <button
+                  onClick={() => setViewMode('compare')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                    viewMode === 'compare' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <PresentationChartBarIcon className="w-4 h-4" />
+                  23区比較
+                </button>
               </div>
-              <button 
-                onClick={handleRefresh}
-                disabled={loading}
-                className={`p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition-all border border-slate-700 flex items-center gap-2 px-3 ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                title="最新のデータを取得"
-              >
-                <ArrowPathIcon className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
-                <span className="text-xs font-bold hidden sm:inline">更新</span>
-              </button>
+
+              <div className="h-8 w-px bg-slate-700 hidden sm:block"></div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap bg-slate-800 p-1 rounded-xl border border-slate-700 shadow-inner max-w-[300px] sm:max-w-md overflow-x-auto no-scrollbar scroll-smooth">
+                  {cities.map((city) => (
+                    <button
+                      key={city}
+                      disabled={loading}
+                      onClick={() => handleCityChange(city)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+                        selectedCity === city 
+                          ? 'bg-slate-100 text-slate-900 shadow-md' 
+                          : 'text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30'
+                      }`}
+                    >
+                      {city}
+                    </button>
+                  ))}
+                </div>
+                <button 
+                  onClick={handleRefresh}
+                  disabled={loading}
+                  className={`p-2 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 rounded-xl transition-all border border-emerald-500/30 flex items-center gap-2 px-3 ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  <ArrowPathIcon className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                  <span className="text-xs font-bold hidden sm:inline">更新</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </header>
 
       <main className="container mx-auto px-4 mt-8">
-        {/* API Quota Alert */}
         {error?.isQuota && (
           <div className="mb-6 bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-xl shadow-sm animate-in slide-in-from-top-4">
             <div className="flex items-center gap-3">
               <ExclamationTriangleIcon className="w-6 h-6 text-amber-600 shrink-0" />
               <div>
                 <p className="text-sm font-bold text-amber-800">APIアクセス制限（429 Quota Exceeded）</p>
-                <p className="text-xs text-amber-700 mt-1">リクエストが集中したため一時的に制限されています。すでに取得済みの区（キャッシュ）は表示可能です。新規取得は数分待機してください。</p>
+                <p className="text-xs text-amber-700 mt-1">リクエストが集中したため一時的に制限されています。すでに取得済みの区（キャッシュ）は表示可能です。</p>
               </div>
             </div>
           </div>
         )}
 
-        {loading ? (
+        {viewMode === 'compare' ? (
+          <div className="space-y-8">
+            <BudgetComparisonChart cache={cache} cities={cities} />
+          </div>
+        ) : loading ? (
           <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center animate-in fade-in duration-500">
             <div className="relative">
               <div className="w-16 h-16 border-4 border-emerald-500/20 border-t-emerald-600 rounded-full animate-spin"></div>
@@ -196,14 +241,30 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between px-2">
-                <div className="flex items-center gap-2">
-                  <ChartBarIcon className="w-6 h-6 text-emerald-600" />
-                  <h2 className="text-lg font-bold text-slate-800">{selectedCity} 観光予算フロー</h2>
+            <div className="space-y-4">
+              <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 px-2">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-emerald-100 rounded-2xl">
+                    <ChartBarIcon className="w-7 h-7 text-emerald-700" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-800 leading-tight">{selectedCity} 観光予算フロー</h2>
+                    <p className="text-slate-500 text-sm font-medium">財源から各事業への資金配分</p>
+                  </div>
                 </div>
-                <div className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold border border-emerald-100">
-                  <span>単位: 千円</span>
+                
+                <div className="flex items-center gap-3">
+                  <div className="bg-white border border-slate-200 px-5 py-3 rounded-2xl shadow-sm flex items-center gap-4">
+                    <div className="p-1.5 bg-emerald-50 rounded-lg">
+                      <BanknotesIcon className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">予算総額（抽出分）</p>
+                      <p className="text-xl font-black text-slate-900 leading-none">
+                        {formatJapaneseCurrency(totalBudget)}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
               
@@ -216,7 +277,7 @@ const App: React.FC = () => {
               
               <div className="px-6 py-4 bg-slate-50 rounded-xl border border-slate-200">
                 <p className="text-xs text-slate-400 italic leading-relaxed text-center">
-                  ※このデータはブラウザに保存されています。最新情報を取得するには右上の更新ボタンを押してください。図の上にマウスを重ねると数値を保存するボタンが表示されます。
+                  ※図の上にマウスを重ねると数値を保存するボタンが表示されます。
                 </p>
               </div>
             </div>
@@ -254,22 +315,10 @@ const App: React.FC = () => {
                           <p className="text-sm text-slate-700 font-bold group-hover:text-emerald-700 line-clamp-2 leading-snug">
                             {source.title || `${selectedCity} 予算資料`}
                           </p>
-                          <div className="mt-1 text-[10px] text-slate-400 truncate opacity-0 group-hover:opacity-100 transition-opacity">
-                            {source.uri}
-                          </div>
                         </a>
                       </li>
                     ))}
                   </ul>
-                </div>
-
-                <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-8 rounded-[2rem] text-white shadow-xl">
-                  <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                    <span>💡</span> {selectedCity}の特色
-                  </h3>
-                  <div className="space-y-4 text-sm text-slate-300 leading-relaxed">
-                    <p>各区独自の予算編成に基づき、観光振興策が実施されています。詳細はサンキー図および左記の分析文をご確認ください。</p>
-                  </div>
                 </div>
               </div>
             </div>
