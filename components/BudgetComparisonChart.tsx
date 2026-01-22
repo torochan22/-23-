@@ -2,7 +2,7 @@
 import React, { useMemo, useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { BudgetResponse, City } from '../types';
-import { BanknotesIcon, InformationCircleIcon, TableCellsIcon } from '@heroicons/react/24/outline';
+import { BanknotesIcon, InformationCircleIcon, TableCellsIcon, ChevronDoubleRightIcon } from '@heroicons/react/24/outline';
 import { formatJapaneseCurrency } from '../App';
 
 interface Props {
@@ -49,7 +49,9 @@ const BudgetComparisonChart: React.FC<Props> = ({ cache, cities }) => {
   useEffect(() => {
     if (!svgRef.current || !containerRef.current) return;
 
-    const width = containerRef.current.clientWidth;
+    // Use a fixed wide width if many cities are loaded to ensure scrollability
+    const loadedCount = chartData.filter(d => d.total > 0).length;
+    const width = Math.max(containerRef.current.clientWidth, loadedCount * 60 + 100, 1000);
     const height = 500;
     const margin = { top: 40, right: 30, bottom: 80, left: 80 };
 
@@ -200,7 +202,7 @@ const BudgetComparisonChart: React.FC<Props> = ({ cache, cities }) => {
             <h2 className="text-xl font-bold text-slate-800">23区観光予算 財源内訳（収入科目）比較</h2>
           </div>
           <p className="text-slate-500 text-sm">
-            取得済み {loadedCount} / 23 区の財源構成を比較しています。同じ色のバーは同じ財源科目（一般財源等）を表します。
+            取得済み {loadedCount} / 23 区の財源構成を比較しています。バーが隠れている場合は横にスクロールしてください。
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -210,14 +212,14 @@ const BudgetComparisonChart: React.FC<Props> = ({ cache, cities }) => {
               className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 shadow-lg transition-all hover:scale-105 active:scale-95"
             >
               <TableCellsIcon className="w-4 h-4" />
-              <span>比較CSVダウンロード</span>
+              <span>比較結果CSV</span>
             </button>
           )}
           {loadedCount < 23 && (
             <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-700 rounded-xl text-xs font-bold border border-amber-100">
               <InformationCircleIcon className="w-4 h-4" />
-              <span className="hidden sm:inline">各区を選択して読み込むと反映されます。</span>
-              <span className="sm:hidden">他区も読込可能</span>
+              <span className="hidden sm:inline">AI更新またはCSVインポートで反映されます。</span>
+              <span className="sm:hidden">未読込あり</span>
             </div>
           )}
         </div>
@@ -239,22 +241,33 @@ const BudgetComparisonChart: React.FC<Props> = ({ cache, cities }) => {
         </div>
       )}
 
-      <div className="relative overflow-x-auto pb-4">
-        <svg 
-          ref={svgRef} 
-          width="100%" 
-          height="500" 
-          viewBox="0 0 1000 500" 
-          className="min-w-[800px]"
-        />
+      <div className="relative group/scroll">
+        <div className="overflow-x-auto pb-6 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+          <div style={{ minWidth: '1000px' }}>
+            <svg 
+              ref={svgRef} 
+              width="100%" 
+              height="500" 
+              viewBox={`0 0 ${Math.max(loadedCount * 60 + 100, 1000)} 500`} 
+              preserveAspectRatio="xMinYMin meet"
+              className="block"
+            />
+          </div>
+        </div>
+        {loadedCount > 10 && (
+          <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none opacity-0 group-hover/scroll:opacity-100 transition-opacity bg-gradient-to-l from-white via-white/80 to-transparent p-4 flex items-center gap-1 text-slate-400">
+            <span className="text-[10px] font-bold">横スクロール可</span>
+            <ChevronDoubleRightIcon className="w-4 h-4 animate-pulse" />
+          </div>
+        )}
       </div>
 
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {chartData.filter(d => d.total > 0).slice(0, 4).map((d, i) => (
-          <div key={d.city} className="bg-slate-50 p-5 rounded-2xl border border-slate-100 shadow-sm transition-all hover:shadow-md hover:bg-white">
+      <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {chartData.filter(d => d.total > 0).slice(0, 8).map((d, i) => (
+          <div key={d.city} className="bg-slate-50 p-5 rounded-2xl border border-slate-100 shadow-sm transition-all hover:shadow-md hover:bg-white group/card">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">RANK {i+1}</span>
-              <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">{d.city}</span>
+              <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full group-hover/card:bg-emerald-600 group-hover/card:text-white transition-colors">{d.city}</span>
             </div>
             <p className="text-xl font-black text-slate-800">{formatJapaneseCurrency(d.total)}</p>
             <div className="mt-2 flex flex-wrap gap-1">

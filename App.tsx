@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { fetchCityBudget } from './services/geminiService';
-import { BudgetResponse, City } from './types';
+import { BudgetResponse, City, SankeyData, SankeyNode, SankeyLink } from './types';
 import SankeyChart from './components/SankeyChart';
 import BudgetComparisonChart from './components/BudgetComparisonChart';
 import { 
@@ -19,7 +19,8 @@ import {
   ArrowsRightLeftIcon,
   ExclamationCircleIcon,
   TableCellsIcon,
-  CloudArrowDownIcon
+  CloudArrowDownIcon,
+  ArrowUpTrayIcon
 } from '@heroicons/react/24/outline';
 
 const CACHE_KEY = 'tokyo_23_budget_cache_v2';
@@ -46,6 +47,7 @@ const App: React.FC = () => {
   });
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<{message: string, isQuota: boolean} | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const budgetInfo = cache[selectedCity] || null;
 
@@ -126,6 +128,76 @@ const App: React.FC = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleImportCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const lines = text.split(/\r?\n/).filter(line => line.trim() !== "");
+      if (lines.length < 2) return alert("CSVファイルが空か、正しくありません。");
+
+      const header = lines[0].split(",");
+      const dataRows = lines.slice(1);
+      
+      const cityGroups: Record<string, { source: string, target: string, value: number }[]> = {};
+
+      dataRows.forEach(line => {
+        const parts = line.split(",");
+        if (parts.length < 4) return;
+        const city = parts[0].trim() as City;
+        const source = parts[1].trim();
+        const target = parts[2].trim();
+        const value = parseInt(parts[3].trim());
+        
+        if (!cityGroups[city]) cityGroups[city] = [];
+        cityGroups[city].push({ source, target, value });
+      });
+
+      const newCache: Partial<Record<City, BudgetResponse & { timestamp: number }>> = { ...cache };
+
+      Object.entries(cityGroups).forEach(([city, links]) => {
+        const uniqueNodes = new Set<string>();
+        const targetNames = new Set<string>();
+        
+        links.forEach(l => {
+          uniqueNodes.add(l.source);
+          uniqueNodes.add(l.target);
+          targetNames.add(l.target);
+        });
+
+        // Identify "root" nodes (revenue sources) to apply the "rev_" prefix
+        // Root nodes are those that appear as a source but NEVER as a target
+        const nodes: SankeyNode[] = Array.from(uniqueNodes).map(name => {
+          const isRoot = !targetNames.has(name);
+          return {
+            id: isRoot ? `rev_${name}` : `n_${name}`,
+            name: name
+          };
+        });
+
+        const sankeyLinks: SankeyLink[] = links.map(l => ({
+          source: !targetNames.has(l.source) ? `rev_${l.source}` : `n_${l.source}`,
+          target: `n_${l.target}`,
+          value: l.value
+        }));
+
+        newCache[city as City] = {
+          data: { nodes, links: sankeyLinks },
+          explanation: `${city}のCSVインポートデータ（${new Date().toLocaleString()}に反映）`,
+          sources: [],
+          timestamp: Date.now()
+        };
+      });
+
+      setCache(newCache);
+      alert(`${Object.keys(cityGroups).length} 区のデータをインポートしました。`);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    };
+    reader.readAsText(file);
   };
 
   const handleCurrentWardExport = () => {
@@ -229,14 +301,32 @@ const App: React.FC = () => {
                   ))}
                 </div>
                 
-                <button 
-                  onClick={handleExportAll}
-                  title="取得済みデータを全てエクスポート"
-                  className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all shadow-lg flex items-center gap-2 px-3"
-                >
-                  <CloudArrowDownIcon className="w-4 h-4" />
-                  <span className="text-xs font-bold hidden xl:inline">全区一括CSV</span>
-                </button>
+                <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl">
+                  <button 
+                    onClick={handleExportAll}
+                    title="取得済みデータを全てエクスポート"
+                    className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-all shadow-lg flex items-center gap-2 px-3"
+                  >
+                    <CloudArrowDownIcon className="w-4 h-4" />
+                    <span className="text-xs font-bold hidden xl:inline">一括エクスポート</span>
+                  </button>
+
+                  <input 
+                    type="file" 
+                    ref={fileInputRef}
+                    accept=".csv"
+                    className="hidden" 
+                    onChange={handleImportCSV}
+                  />
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    title="CSVからデータをインポート"
+                    className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-all shadow-lg flex items-center gap-2 px-3"
+                  >
+                    <ArrowUpTrayIcon className="w-4 h-4" />
+                    <span className="text-xs font-bold hidden xl:inline">インポート</span>
+                  </button>
+                </div>
 
                 <button 
                   onClick={handleRefresh}
@@ -244,7 +334,7 @@ const App: React.FC = () => {
                   className={`p-2 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 rounded-xl transition-all border border-emerald-500/30 flex items-center gap-2 px-3 ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <ArrowPathIcon className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                  <span className="text-xs font-bold hidden sm:inline">更新</span>
+                  <span className="text-xs font-bold hidden sm:inline">AI更新</span>
                 </button>
               </div>
             </div>
@@ -289,12 +379,20 @@ const App: React.FC = () => {
             </div>
             <h2 className="text-2xl font-bold text-slate-800 mb-2">読み込みエラー</h2>
             <p className="text-slate-500 mb-8">{error.message}</p>
-            <button 
-              onClick={handleRefresh}
-              className="px-8 py-3 bg-emerald-600 text-white font-bold rounded-2xl hover:bg-emerald-700 transform transition hover:-translate-y-1 shadow-lg"
-            >
-              再試行
-            </button>
+            <div className="flex gap-4 justify-center">
+              <button 
+                onClick={handleRefresh}
+                className="px-8 py-3 bg-emerald-600 text-white font-bold rounded-2xl hover:bg-emerald-700 transform transition hover:-translate-y-1 shadow-lg"
+              >
+                再試行
+              </button>
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="px-8 py-3 bg-slate-800 text-white font-bold rounded-2xl hover:bg-slate-900 transform transition hover:-translate-y-1 shadow-lg"
+              >
+                CSVをアップロード
+              </button>
+            </div>
           </div>
         ) : budgetInfo ? (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -385,7 +483,7 @@ const App: React.FC = () => {
                   <div className="p-2 bg-blue-50 rounded-xl">
                     <DocumentTextIcon className="w-7 h-7 text-blue-600" />
                   </div>
-                  <h2 className="text-xl font-bold text-slate-800">AIによる{selectedCity}予算分析</h2>
+                  <h2 className="text-xl font-bold text-slate-800">解析データ分析</h2>
                 </div>
                 <div className="prose prose-emerald max-w-none">
                   <div className="text-slate-600 whitespace-pre-line leading-loose text-lg font-medium">
@@ -415,7 +513,7 @@ const App: React.FC = () => {
                         </a>
                       </li>
                     )) : (
-                      <p className="text-xs text-slate-400 px-3 italic">参照資料は見つかりませんでした。</p>
+                      <p className="text-xs text-slate-400 px-3 italic">資料リンクは直接提供されていません。</p>
                     )}
                   </ul>
                 </div>
@@ -437,7 +535,7 @@ const App: React.FC = () => {
             <span className="font-black text-slate-800 tracking-tight uppercase tracking-widest">23-City Budget Explorer</span>
           </div>
           <p className="text-slate-500 text-sm">
-            本システムはGoogle Gemini APIのグラウンディング機能を利用して各区の公開資料をリアルタイムで解析・生成しています。
+            本システムはGoogle Gemini APIのグラウンディング機能を利用した自動解析またはCSVインポートによって動作しています。
           </p>
         </div>
       </footer>
