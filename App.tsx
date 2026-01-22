@@ -16,13 +16,17 @@ import {
   ClockIcon,
   BanknotesIcon,
   PresentationChartBarIcon,
-  ArrowsRightLeftIcon
+  ArrowsRightLeftIcon,
+  ExclamationCircleIcon,
+  TableCellsIcon,
+  CloudArrowDownIcon
 } from '@heroicons/react/24/outline';
 
 const CACHE_KEY = 'tokyo_23_budget_cache_v2';
 
 // Utility to format "Thousand Yen" to natural Japanese units
 export const formatJapaneseCurrency = (kYen: number) => {
+  if (kYen === 0) return "0 円";
   if (kYen >= 100000) {
     return `${(kYen / 100000).toFixed(2)} 億円`;
   }
@@ -46,10 +50,16 @@ const App: React.FC = () => {
   const budgetInfo = cache[selectedCity] || null;
 
   const totalBudget = useMemo(() => {
-    if (!budgetInfo?.data.links) return 0;
-    return budgetInfo.data.links
-      .filter(link => link.source.startsWith('rev_'))
-      .reduce((sum, link) => sum + link.value, 0);
+    if (!budgetInfo?.data.links || budgetInfo.data.links.length === 0) return 0;
+    const sourceLinks = budgetInfo.data.links.filter(link => link.source.startsWith('rev_'));
+    if (sourceLinks.length > 0) {
+      return sourceLinks.reduce((sum, link) => sum + link.value, 0);
+    }
+    const nodeSums: Record<string, number> = {};
+    budgetInfo.data.links.forEach(l => {
+        nodeSums[l.source] = (nodeSums[l.source] || 0) + l.value;
+    });
+    return Math.max(...Object.values(nodeSums), 0);
   }, [budgetInfo]);
 
   useEffect(() => {
@@ -88,6 +98,59 @@ const App: React.FC = () => {
     loadData(selectedCity);
   }, [selectedCity, loadData]);
 
+  const handleExportAll = () => {
+    const headers = ["自治体名", "元項目", "先項目", "金額(千円)", "金額(表示用)"];
+    const rows: any[] = [];
+    
+    Object.entries(cache).forEach(([city, budget]: [any, any]) => {
+      const nodeNameMap = new Map(budget.data.nodes.map((n: any) => [n.id, n.name]));
+      budget.data.links.forEach((link: any) => {
+        rows.push([
+          city,
+          nodeNameMap.get(link.source) || link.source,
+          nodeNameMap.get(link.target) || link.target,
+          link.value,
+          formatJapaneseCurrency(link.value)
+        ]);
+      });
+    });
+
+    if (rows.length === 0) return alert("出力するデータがありません。各区を選択して読み込んでください。");
+
+    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `東京23区観光予算_一括エクスポート_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleCurrentWardExport = () => {
+    if (!budgetInfo) return;
+    const nodeNameMap = new Map(budgetInfo.data.nodes.map(n => [n.id, n.name]));
+    const headers = ["自治体名", "元項目", "先項目", "金額(千円)", "金額(表示用)"];
+    const rows = budgetInfo.data.links.map(link => [
+      selectedCity,
+      nodeNameMap.get(link.source) || link.source,
+      nodeNameMap.get(link.target) || link.target,
+      link.value,
+      formatJapaneseCurrency(link.value)
+    ]);
+
+    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${selectedCity}_観光予算詳細_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleCityChange = (city: City) => {
     if (city !== selectedCity) {
       setSelectedCity(city);
@@ -104,6 +167,8 @@ const App: React.FC = () => {
     '品川区', '目黒区', '大田区', '世田谷区', '渋谷区', '中野区', '杉並区', '豊島区', 
     '北区', '荒川区', '板橋区', '練馬区', '足立区', '葛飾区', '江戸川区'
   ];
+
+  const hasChartData = budgetInfo && budgetInfo.data.nodes.length > 0 && budgetInfo.data.links.length > 0;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-16">
@@ -163,6 +228,16 @@ const App: React.FC = () => {
                     </button>
                   ))}
                 </div>
+                
+                <button 
+                  onClick={handleExportAll}
+                  title="取得済みデータを全てエクスポート"
+                  className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all shadow-lg flex items-center gap-2 px-3"
+                >
+                  <CloudArrowDownIcon className="w-4 h-4" />
+                  <span className="text-xs font-bold hidden xl:inline">全区一括CSV</span>
+                </button>
+
                 <button 
                   onClick={handleRefresh}
                   disabled={loading}
@@ -204,7 +279,7 @@ const App: React.FC = () => {
             </div>
             <div>
               <p className="text-xl font-bold text-slate-700">{selectedCity}の最新予算を解析中</p>
-              <p className="text-slate-500 mt-2">ウェブ上の公開資料から詳細な細目を抽出しています...</p>
+              <p className="text-slate-500 mt-2">ウェブ上の公開資料から詳細な細目を抽出・換算しています...</p>
             </div>
           </div>
         ) : error && !budgetInfo ? (
@@ -264,20 +339,42 @@ const App: React.FC = () => {
                         {formatJapaneseCurrency(totalBudget)}
                       </p>
                     </div>
+                    <button 
+                      onClick={handleCurrentWardExport}
+                      className="ml-2 p-2 bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-600 rounded-xl transition-all border border-slate-200 flex items-center gap-2 px-3"
+                      title="この区のデータをCSV出力"
+                    >
+                      <TableCellsIcon className="w-4 h-4" />
+                      <span className="text-xs font-bold">CSV</span>
+                    </button>
                   </div>
                 </div>
               </div>
               
-              <SankeyChart 
-                data={budgetInfo.data} 
-                city={selectedCity}
-                width={Math.max(window.innerWidth * 0.9, 1200)} 
-                height={850} 
-              />
+              {hasChartData ? (
+                <SankeyChart 
+                    data={budgetInfo.data} 
+                    city={selectedCity}
+                    width={Math.max(window.innerWidth * 0.9, 1200)} 
+                    height={850} 
+                />
+              ) : (
+                <div className="bg-white border-2 border-dashed border-slate-200 rounded-3xl p-16 text-center">
+                  <ExclamationCircleIcon className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                  <p className="text-lg font-bold text-slate-600">視覚化データの抽出に失敗しました</p>
+                  <p className="text-slate-400 text-sm mt-2 max-w-md mx-auto">
+                    AIが予算構造をJSON形式で生成できませんでした。
+                    下の「AIによる分析」にはテキスト形式の調査結果が表示されていますので、そちらをご確認ください。
+                  </p>
+                  <button onClick={handleRefresh} className="mt-6 px-6 py-2 bg-emerald-600 text-white rounded-xl text-sm font-bold shadow-lg hover:bg-emerald-700 transition-all">
+                    再取得を試みる
+                  </button>
+                </div>
+              )}
               
               <div className="px-6 py-4 bg-slate-50 rounded-xl border border-slate-200">
                 <p className="text-xs text-slate-400 italic leading-relaxed text-center">
-                  ※図の上にマウスを重ねると数値を保存するボタンが表示されます。
+                  ※AIによる抽出・換算のため、実際の予算書と端数などが異なる場合があります。
                 </p>
               </div>
             </div>
@@ -304,7 +401,7 @@ const App: React.FC = () => {
                     <h2 className="text-lg font-bold text-slate-800">参照資料</h2>
                   </div>
                   <ul className="space-y-3">
-                    {budgetInfo.sources.map((source, idx) => (
+                    {budgetInfo.sources.length > 0 ? budgetInfo.sources.map((source, idx) => (
                       <li key={idx}>
                         <a 
                           href={source.uri} 
@@ -317,7 +414,9 @@ const App: React.FC = () => {
                           </p>
                         </a>
                       </li>
-                    ))}
+                    )) : (
+                      <p className="text-xs text-slate-400 px-3 italic">参照資料は見つかりませんでした。</p>
+                    )}
                   </ul>
                 </div>
               </div>

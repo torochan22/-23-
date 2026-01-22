@@ -3,7 +3,7 @@ import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { sankey, sankeyLinkHorizontal, sankeyCenter } from 'd3-sankey';
 import { SankeyData, SankeyNode, SankeyLink } from '../types';
-import { ArrowDownTrayIcon } from '@heroicons/react/24/outline';
+import { ArrowDownTrayIcon, TableCellsIcon } from '@heroicons/react/24/outline';
 import { formatJapaneseCurrency } from '../App';
 
 interface Props {
@@ -151,9 +151,38 @@ const SankeyChart: React.FC<Props> = ({ data, city, width = 800, height = 700 })
     URL.revokeObjectURL(svgUrl);
   };
 
+  const handleCsvDownload = () => {
+    const nodeNameMap = new Map(data.nodes.map(n => [n.id, n.name]));
+    const headers = ["元項目", "先項目", "金額(千円)", "金額(表示用)"];
+    const rows = data.links.map(link => [
+      nodeNameMap.get(link.source) || link.source,
+      nodeNameMap.get(link.target) || link.target,
+      link.value,
+      formatJapaneseCurrency(link.value)
+    ]);
+
+    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${city}_観光予算詳細_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="w-full relative bg-white rounded-2xl p-6 shadow-sm border border-slate-200 group">
-      <div className="absolute top-4 right-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute top-4 right-4 z-10 flex gap-2">
+        <button
+          onClick={handleCsvDownload}
+          className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 shadow-lg transition-transform hover:scale-105 active:scale-95"
+        >
+          <TableCellsIcon className="w-4 h-4" />
+          <span>詳細CSV</span>
+        </button>
         <button
           onClick={handleDownload}
           className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-bold hover:bg-slate-800 shadow-lg transition-transform hover:scale-105 active:scale-95"

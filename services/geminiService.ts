@@ -10,26 +10,33 @@ export const fetchCityBudget = async (city: City): Promise<BudgetResponse> => {
   const ai = new GoogleGenAI({ apiKey: API_KEY });
   
   const prompt = `
-    ${city}の最新（令和6年度または令和5年度補正を含む最新）の観光関連予算について詳細に調査し、その内訳を可能な限り「細目（具体的な事業レベル）」まで分解してサンキーダイアグラム用のJSON形式で出力してください。
+    ${city}の最新（令和6年度当初予算、または令和5年度補正を含む最新）の「観光関連予算」について、公式資料を元に詳細に調査してください。
     
-    以下の厳格な階層構造（一方向のフロー）を維持してください。
-    【重要】循環参照（A→B→AやA→A）は絶対に含めないでください。IDは各層でユニークにし、以下のプレフィックスを付けてください。
-    
-    1. 【財源 (rev_*)】: 一般財源、国庫支出金、都支出金、地方債、その他収入など。
-    2. 【費目 (exp_*)】: 「観光振興費」や「商業観光費」など。
-    3. 【事業カテゴリー (cat_*)】: 観光プロモーション、イベント支援、観光インフラ整備、ふるさと納税関連など。
-    4. 【具体的細目 (item_*)】: 各区の特色を反映した具体的事業。
-    
-    フローは必ず [財源] -> [費目] -> [事業カテゴリー] -> [具体的細目] の順に流れるようにしてください。
-    
-    JSON出力形式：
+    【最重要：単位の統一】
+    全ての金額は必ず「千円（1,000円）」単位の数値で出力してください。
+    資料に「億円」や「百万円」で記載されている場合は、以下の通り正確に換算してください：
+    ・1億円 → 100,000
+    ・1,000万円 → 10,000
+    ・100万円 → 1,000
+    数値にカンマや単位（円、千円など）を含めず、純粋な「数値」としてJSONに格納してください。
+
+    【構造の定義】
+    以下の4層構造でサンキーダイアグラム用データを作成してください。循環参照は厳禁です。
+    1. 【財源 (rev_*)】: 一般財源、国庫支出金、都支出金など
+    2. 【費目 (exp_*)】: 観光振興費、産業振興費など
+    3. 【事業カテゴリー (cat_*)】: プロモーション、施設整備、イベント支援など
+    4. 【具体的細目 (item_*)】: 具体的事業名（例：港区シティプロモーション事業、観光インフォメーション運営など）
+
+    フロー： [財源] -> [費目] -> [事業カテゴリー] -> [具体的細目]
+
+    JSON出力形式（この形式のみを出力）：
     {
       "nodes": [{"id": "prefix_id", "name": "名称"}, ...],
-      "links": [{"source": "id1", "target": "id2", "value": 数値],
-      "explanation": "詳細な解説文"
+      "links": [{"source": "source_id", "target": "target_id", "value": 数値],
+      "explanation": "予算の主な特徴と、単位換算の根拠を含む詳細解説（日本語）"
     }
-    
-    ※実際の予算書に基づいた具体的数値を抽出してください。
+
+    ※もし特定の事業の金額が不明な場合は、合計から逆算するか、合理的な推定値を割り当て、その旨をexplanationに記載してください。
   `;
 
   try {
@@ -54,21 +61,30 @@ export const fetchCityBudget = async (city: City): Promise<BudgetResponse> => {
     let budgetData: SankeyData = { nodes: [], links: [] };
     let explanation = "";
     
+    // Improved JSON extraction that handles potential text before/after
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      budgetData = {
-        nodes: parsed.nodes || [],
-        links: parsed.links || []
-      };
-      explanation = parsed.explanation || text.split('{')[0];
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        budgetData = {
+          nodes: parsed.nodes || [],
+          links: parsed.links || []
+        };
+        explanation = parsed.explanation || text.replace(jsonMatch[0], '').trim();
+      } catch (e) {
+        console.error("JSON Parse Error:", e);
+        explanation = "データの解析に失敗しました。以下はAIの回答テキストです：\n\n" + text;
+      }
     } else {
       explanation = text;
     }
 
+    // Basic validation of IDs to prevent breakage
+    const nodeIds = new Set(budgetData.nodes.map(n => n.id));
+    budgetData.links = budgetData.links.filter(l => nodeIds.has(l.source) && nodeIds.has(l.target));
+
     return { data: budgetData, explanation, sources };
   } catch (error: any) {
-    // Re-throw with more context if it's a quota error
     if (error.status === 429 || error.message?.includes('429')) {
       throw new Error("Quota exceeded: 429");
     }
